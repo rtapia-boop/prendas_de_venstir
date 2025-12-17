@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vestuario 3D Interactivo (OBJ y Primitivas)</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: sans-serif; }
+        #canvas-container { position: absolute; width: 100%; height: 100%; }
+        #ropa-menu {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.8);
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            z-index: 10;
+        }
+        .ropa-item { margin-bottom: 10px; }
+        .ropa-item button {
+            padding: 8px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            width: 100%;
+            text-align: left;
+            transition: background 0.3s;
+        }
+        .ropa-item button:hover { background-color: #ddd; }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    
+    <div id="ropa-menu">
+        <h3>👗 Ropa Disponible (Click para Vestir)</h3>
+        
+        <h4>Camisas (Primitivas)</h4>
+        <div class="ropa-item"><button id="btn-shirt-blue" style="background-color: #007bff; color: white;">Camisa Azul</button></div>
+        <div class="ropa-item"><button id="btn-shirt-red" style="background-color: #dc3545; color: white;">Camisa Roja</button></div>
+                     <div class="ropa-item">
+    <button id="btn-pants-formal" style="background-color:#495057; color:white;">
+        Camisa Casual (OBJ)
+    </button>
+</div>
+        
+       
+        <div class="ropa-item"><button id="btn-shirt-none">Quitar Camisa</button></div>
+
+
+        <hr>
+
+        <h4>Pantalones</h4>
+        <div class="ropa-item"><button id="btn-pants-green" style="background-color: #28a745; color: white;">Pantalón Cónico (Verde)</button></div>
+        <div class="ropa-item"><button id="btn-pants-gray" style="background-color: #6c757d; color: white;">Pantalón Cónico (Gris)</button></div>
+       
+ 
+ <div class="ropa-item"><button id="btn-pants-formal2" style="background-color: #343a40; color: white;">Pantalon Formal</button></div>
+        <div class="ropa-item"><button id="btn-pants-none">Quitar Pantalón</button></div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.158.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.158.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+        import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
+
+        // --- CONSTANTE DE ESCALA ---
+        // IMPORTANTE: Estos valores deben coincidir con la escala real de tus modelos 3D
+        const AVATAR_SCALE = 0.01; 
+        const CLOTHING_MODEL_SCALE = 0.01; 
+
+        // --- DATOS CENTRALIZADOS DE ROPA ---
+        const CLOTHING_DATA = {
+    'shirt-blue': { type: 'primitive', color: 0x007bff },
+    'shirt-red': { type: 'primitive', color: 0xdc3545 },
+    'pants-green': { type: 'primitive', color: 0x28a745 },
+    'pants-gray': { type: 'primitive', color: 0x6c757d },
+    
+    // OBJ: Usamos un nombre más claro ya que carga un polo y definimos sus ajustes
+    
+
+
+    'pants-formal': { 
+        type: 'obj', 
+        modelPath: 'modelos/Pants_02.obj', // Archivo actual (que es un polo)
+        mtlPath: 'modelos/Pants_02.mtl',
+        // Factor para aumentar el tamaño (Ajuste este valor según lo necesite, si es muy pequeño)
+        ADJUST_SCALE_FACTOR: 140, // Aumentado drásticamente para probar visibilidad
+        // Posición Y para colocar el modelo en el tronco/cuerpo
+        ADJUST_Y: 0.01
+             } ,
+
+    'pants-formal2': { 
+    type: 'obj',
+    modelPath: 'modelos/pants.obj',
+    mtlPath: 'modelos/pants.mtl', // si no tiene MTL, puedes poner null
+    ADJUST_SCALE_FACTOR: 0.7   ,   // ajusta si se ve grande o pequeño
+    ADJUST_Y: 0.05  ,     
+    
+    },
+
+   
+
+
+        
+        };
+
+        // Almacenamiento de modelos OBJ cargados para evitar recargar
+        const loadedObjModels = {};
+
+        // Variables globales
+        const scene = new THREE.Scene();
+        let avatar = null;
+        let currentShirt = null;
+        let currentPants = null;
+
+        // Configuración de escena, cámara y renderizador
+        const container = document.getElementById('canvas-container');
+        const sizes = { width: window.innerWidth, height: window.innerHeight };
+        const camera = new THREE.PerspectiveCamera(75, sizes.width / sizes.height, 0.1, 1000);
+        camera.position.set(0, 1.8, 5); 
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(sizes.width, sizes.height);
+        container.appendChild(renderer.domElement);
+        renderer.setClearColor(0xf0f0f0); 
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap; 
+
+        // Controles de Cámara
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.target.set(0, 1.5, 0); 
+        controls.update();
+
+        // Luces
+        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        directionalLight.position.set(5, 10, 7.5);
+        directionalLight.castShadow = true; 
+        directionalLight.shadow.mapSize.width = 1024;
+        directionalLight.shadow.mapSize.height = 1024;
+        scene.add(directionalLight);
+
+        // Plano para recibir sombras
+        const planeGeometry = new THREE.PlaneGeometry(20, 20);
+        const planeMaterial = new THREE.MeshStandardMaterial({ color: 0xcccccc });
+        const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+        plane.rotation.x = -Math.PI / 2;
+        plane.position.y = 0;
+        plane.receiveShadow = true;
+        scene.add(plane);
+
+
+        // ----------------------------------------------------------------
+        // 1. CARGA DE MODELOS (Avatar y Ropa OBJ)
+        // ----------------------------------------------------------------
+
+        /**
+         * Carga un modelo OBJ, opcionalmente con un MTL.
+         * @param {string} modelPath - Ruta al archivo OBJ.
+         * @param {string} mtlPath - Ruta al archivo MTL.
+         * @param {number} scale - Escala a aplicar al modelo.
+         * @param {number} defaultColor - Color de fallback si fallan los materiales.
+         * @param {function(THREE.Object3D | null): void} callback - Función a ejecutar con el objeto cargado.
+         */
+        function loadObj(modelPath, mtlPath, scale, defaultColor = 0x808080, callback) {
+            const objLoader = new OBJLoader();
+            const mtlLoader = new MTLLoader();
+            
+            const executeLoad = (loader) => {
+                loader.load(
+                    modelPath, 
+                    (object) => {
+                        // *** AJUSTE CRÍTICO: Escala y Posición inicial ***
+                        object.scale.set(scale, scale, scale); 
+                        object.position.set(0, 0, 0); 
+                        
+                        object.traverse((child) => {
+                            if (child.isMesh) {
+                                child.castShadow = true;
+                                child.receiveShadow = true;
+                                // Si no tiene material (por fallo de MTL), aplica un StandardMaterial
+                                if (!child.material || (Array.isArray(child.material) && child.material.every(m => !m.isMaterial))) {
+                                     child.material = new THREE.MeshStandardMaterial({ color: defaultColor });
+                                } else if (Array.isArray(child.material)) {
+                                    // Asegura que todos los materiales sean MeshStandardMaterial si es necesario
+                                    child.material = child.material.map(mat => {
+                                        if (mat.isMeshBasicMaterial) {
+                                            return new THREE.MeshStandardMaterial({ color: mat.color });
+                                        }
+                                        return mat;
+                                    });
+                                } else if (child.material.isMeshBasicMaterial) {
+                                    child.material = new THREE.MeshStandardMaterial({ color: child.material.color });
+                                }
+                            }
+                        });
+                        
+                        console.log(`✅ Objeto ${modelPath} cargado.`);
+                        callback(object);
+                    },
+                    (xhr) => { 
+                        console.log(`Cargando ${modelPath}: ${(xhr.loaded / xhr.total * 100).toFixed(0)}%`); 
+                    },
+                    (error) => { 
+                        console.error(`❌ Error FATAL al cargar ${modelPath}. Verifique la ruta y el servidor.`, error); 
+                        callback(null); 
+                    }
+                );
+            };
+
+            // Intenta cargar MTL y luego OBJ
+            if (mtlPath) {
+                mtlLoader.load(
+                    mtlPath, 
+                    (materials) => {
+                        materials.preload();
+                        objLoader.setMaterials(materials);
+                        executeLoad(objLoader);
+                    },
+                    undefined,
+                    (error) => {
+                         // Advertencia si falla solo el MTL (el OBJ todavía se intentará cargar)
+                         console.warn(`Advertencia: No se pudo cargar ${mtlPath}. Usando OBJLoader sin materiales.`, error);
+                         executeLoad(objLoader); 
+                    }
+                );
+            } else {
+                executeLoad(objLoader);
+            }
+        }
+
+        function loadAvatar() {
+            // Carga el avatar Man.obj
+            loadObj('modelos/Man.obj', 'modelos/Man.mtl', AVATAR_SCALE, 0x808080, (object) => {
+                if (object) {
+                    avatar = object;
+                    scene.add(avatar);
+                    console.log('✅ Avatar Man.obj agregado a la escena.');
+                } else {
+                    // Fallback para el avatar si falla el OBJ
+                    const fallbackMesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1.8, 0.4), new THREE.MeshStandardMaterial({ color: 0xff0000 }));
+                    fallbackMesh.position.set(0, 0.9, 0);
+                    fallbackMesh.castShadow = true;
+                    scene.add(fallbackMesh);
+                    console.error('❌ Usando avatar de caja de emergencia.');
+                }
+            });
+        }
+
+        // Función para cargar modelos de ropa OBJ (o devolver un clon desde la caché)
+      function loadClothingModel(clothingId, callback) {
+    const data = CLOTHING_DATA[clothingId];
+    
+    // 1. Devolver clon si ya está en caché
+    if (loadedObjModels[clothingId]) {
+        const clonedObject = loadedObjModels[clothingId].clone();
+        // Aplicar la posición guardada en la caché
+        clonedObject.position.set(data.ADJUST_X || 0,
+    data.ADJUST_Y || 0,
+    data.ADJUST_Z || 0); 
+        callback(clonedObject);
+        return;
+    }
+
+    // 2. Cargar el modelo si no está en caché
+    const defaultColor = CLOTHING_DATA['shirt-blue'].color; 
+    
+    // Usamos la escala base, pero la ajustaremos después de la carga
+    loadObj(data.modelPath, data.mtlPath, CLOTHING_MODEL_SCALE, defaultColor, (object) => {
+        if (object) {
+            
+            // --- APLICACIÓN DE AJUSTES ESPECÍFICOS DEL MODELO OBJ ---
+            
+            // 1. Reajuste de Escala (Si es necesario)
+            if (data.ADJUST_SCALE_FACTOR) {
+                // Multiplica la escala existente (0.01) por el factor de ajuste
+                const newScale = CLOTHING_MODEL_SCALE * data.ADJUST_SCALE_FACTOR;
+                object.scale.set(newScale, newScale, newScale);
+                console.log(`Modelo ${clothingId} re-escalado a ${newScale}`);
+            }
+
+            // 2. Ajuste de Posición Y (Necesario para colocar el modelo)
+            // Esto asume que el objeto 3D del pantalón no fue exportado con el origen centrado
+            // en la Y=0 del suelo, sino en la Y=0 de su propio modelo.
+            if (data.ADJUST_Y !== undefined) {
+                object.position.set(0, data.ADJUST_Y, 0);
+            }
+            
+            // Almacena el original en la caché (con la escala y posición ya corregidas)
+            loadedObjModels[clothingId] = object; 
+            callback(object.clone()); 
+        } else {
+            callback(null);
+        }
+    });
+}
+
+        // ----------------------------------------------------------------
+        // 2. CREACIÓN DE VESTIMENTA (Primitivas)
+        // ----------------------------------------------------------------
+
+        const CLOTHING_BASE_MATERIAL = new THREE.MeshStandardMaterial({ 
+            side: THREE.DoubleSide, 
+            metalness: 0.1, 
+            roughness: 0.7  
+        });
+
+        // Crea prendas hechas de primitivas (camisas y pantalones cónicos)
+        function createPrimitiveClothing(type, hexColor) {
+            const color = new THREE.Color(hexColor);
+            
+            const material = CLOTHING_BASE_MATERIAL.clone();
+            material.color.set(color);
+            
+            let clothingGroup = new THREE.Group();
+            
+            const finalizeMesh = (mesh) => {
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                return mesh;
+            };
+
+            // --- CAMISA (Primitivas) ---
+            if (type === 'shirt') {
+                // (Mantenemos la geometría de camisa anterior para la opción Primitiva)
+                const torsoGeometry = new THREE.CylinderGeometry(0.26, 0.22, 0.6, 16);
+                const torsoMesh = finalizeMesh(new THREE.Mesh(torsoGeometry, material));
+                torsoMesh.position.set(0, 1.25, 0); 
+                clothingGroup.add(torsoMesh);
+
+                const shoulderCapGeometry = new THREE.SphereGeometry(0.25, 12, 12, 0, Math.PI * 2, 0, Math.PI / 4);
+                const shoulderCapMesh = finalizeMesh(new THREE.Mesh(shoulderCapGeometry, material));
+                shoulderCapMesh.position.set(0, 1.55, 0); 
+                clothingGroup.add(shoulderCapMesh);
+
+                const neckGeometry = new THREE.CylinderGeometry(0.08, 0.08, 0.1, 10);
+                const neckMesh = finalizeMesh(new THREE.Mesh(neckGeometry, material));
+                neckMesh.position.set(0, 1.6, 0); 
+                clothingGroup.add(neckMesh);
+                
+                const collarGeometry = new THREE.BoxGeometry(0.3, 0.05, 0.2);
+                const collarMesh = finalizeMesh(new THREE.Mesh(collarGeometry, material));
+                collarMesh.position.set(0, 1.58, 0.1); 
+                collarMesh.rotation.x = Math.PI / 8; 
+                clothingGroup.add(collarMesh);
+
+                const sleeveLength = 0.35;
+                const sleeveRadius = 0.08;
+                const sleeveR = finalizeMesh(new THREE.Mesh(new THREE.CylinderGeometry(sleeveRadius, sleeveRadius, sleeveLength, 8), material));
+                sleeveR.position.set(-0.33, 1.35, 0); 
+                sleeveR.rotation.z = Math.PI / 2; 
+                clothingGroup.add(sleeveR);
+
+                const sleeveL = finalizeMesh(new THREE.Mesh(new THREE.CylinderGeometry(sleeveRadius, sleeveRadius, sleeveLength, 8), material));
+                sleeveL.position.set(0.33, 1.35, 0); 
+                sleeveL.rotation.z = Math.PI / 2;
+                clothingGroup.add(sleeveL);
+            } 
+            
+            // --- PANTALÓN CÓNICO (Primitivas) ---
+            else if (type === 'pants') {
+                // (Mantenemos la geometría de pantalón anterior para la opción Primitiva)
+                const hipGeometry = new THREE.CylinderGeometry(0.28, 0.3, 0.2, 16);
+                const hipMesh = finalizeMesh(new THREE.Mesh(hipGeometry, material));
+                hipMesh.position.set(0, 0.95, 0); 
+                clothingGroup.add(hipMesh);
+                
+                const crotchGeometry = new THREE.TorusGeometry(0.1, 0.03, 8, 16, Math.PI); 
+                const crotchMesh = finalizeMesh(new THREE.Mesh(crotchGeometry, material));
+                crotchMesh.position.set(0, 0.95, 0); 
+                crotchMesh.rotation.x = Math.PI / 2; 
+                clothingGroup.add(crotchMesh);
+
+                const legRGeometry = new THREE.CylinderGeometry(0.12, 0.08, 1.0, 12);
+                const legRMesh = finalizeMesh(new THREE.Mesh(legRGeometry, material));
+                legRMesh.position.set(-0.15, 0.45, 0); 
+                clothingGroup.add(legRMesh);
+
+                const legLGeometry = new THREE.CylinderGeometry(0.12, 0.08, 1.0, 12);
+                const legLMesh = finalizeMesh(new THREE.Mesh(legLGeometry, material));
+                legLMesh.position.set(0.15, 0.45, 0); 
+                clothingGroup.add(legLMesh);
+
+                const footCapR = finalizeMesh(new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8, 0, Math.PI * 2, 0, Math.PI / 2), material));
+                footCapR.position.set(-0.15, 0.0, 0.0);
+                footCapR.rotation.x = Math.PI; 
+                clothingGroup.add(footCapR);
+
+                const footCapL = finalizeMesh(new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8, 0, Math.PI * 2, 0, Math.PI / 2), material));
+                footCapL.position.set(0.15, 0.0, 0.0);
+                footCapL.rotation.x = Math.PI;
+                clothingGroup.add(footCapL);
+            }
+            
+            return clothingGroup;
+        }
+
+        // --- LÓGICA UNIFICADA PARA VESTIR (Ajustada para asincronía) ---
+        function dressAvatar(clothingId) {
+            const [type, colorId] = clothingId.split('-');
+            const data = CLOTHING_DATA[clothingId];
+            
+            // 1. Limpiar la prenda anterior
+            if (type === 'shirt' && currentShirt) {
+                scene.remove(currentShirt);
+                currentShirt = null;
+            } else if (type === 'pants' && currentPants) {
+                scene.remove(currentPants);
+                currentPants = null;
+            } 
+            
+            // 2. Colocar la nueva prenda
+            if (colorId !== 'none') {
+                if (data.type === 'primitive') {
+                    // Carga por primitivas (Síncrona)
+                    const newClothing = createPrimitiveClothing(type, data.color);
+                    scene.add(newClothing); 
+                    if (type === 'shirt') currentShirt = newClothing;
+                    if (type === 'pants') currentPants = newClothing;
+                    console.log(`Se ha colocado: ${clothingId} (Primitiva)`);
+                } else if (data.type === 'obj') {
+                    // Carga por OBJ (Asíncrona)
+                    loadClothingModel(clothingId, (newClothing) => {
+                        if (newClothing) {
+                            // Aseguramos que la prenda anterior se haya limpiado 
+                            // *antes* de que se complete la carga asíncrona.
+                            // Si el usuario hace doble click rápido, esto podría fallar,
+                            // por lo que una limpieza adicional aquí es mejor:
+                            if (type === 'shirt' && currentShirt) scene.remove(currentShirt);
+                            if (type === 'pants' && currentPants) scene.remove(currentPants);
+                            
+                            scene.add(newClothing);
+                            if (type === 'shirt') currentShirt = newClothing;
+                            if (type === 'pants') currentPants = newClothing;
+                            console.log(`Se ha colocado: ${clothingId} (OBJ)`);
+                        }
+                    });
+                }
+            }
+        }
+
+        // ----------------------------------------------------------------
+        // 3. LISTENERS y BUCLE DE ANIMACIÓN
+        // ----------------------------------------------------------------
+
+        // Asignación de eventos de clic
+        
+        
+
+        
+        document.getElementById('btn-shirt-blue').addEventListener('click', () => dressAvatar('shirt-blue'));
+        document.getElementById('btn-shirt-red').addEventListener('click', () => dressAvatar('shirt-red'));
+        document.getElementById('btn-pants-formal2').addEventListener('click', () => dressAvatar('pants-formal2'));
+        document.getElementById('btn-shirt-none').addEventListener('click', () => dressAvatar('shirt-none'));
+
+        document.getElementById('btn-pants-green').addEventListener('click', () => dressAvatar('pants-green'));
+        document.getElementById('btn-pants-gray').addEventListener('click', () => dressAvatar('pants-gray'));
+        document.getElementById('btn-pants-formal').addEventListener('click', () => dressAvatar('pants-formal')); 
+        document.getElementById('btn-pants-none').addEventListener('click', () => dressAvatar('pants-none'));
+
+        // Bucle de renderizado
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // Manejo de redimensionamiento de ventana
+        window.addEventListener('resize', () => {
+            sizes.width = window.innerWidth;
+            sizes.height = window.innerHeight;
+            camera.aspect = sizes.width / sizes.height;
+            camera.updateProjectionMatrix();
+            renderer.setSize(sizes.width, sizes.height);
+        });
+
+        // Iniciar la aplicación: Cargar Avatar y empezar a renderizar
+        loadAvatar();
+        animate();
+    </script>
+</body>
+</html>
